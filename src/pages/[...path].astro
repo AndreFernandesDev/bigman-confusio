@@ -1,0 +1,133 @@
+---
+import { resetCSS, breakpoints } from "../constants";
+
+export function getStaticPaths() {
+  return [
+    {params: {path: undefined}},
+    {params: {path: 'rover'}},
+    {params: {path: 'spot'}},
+  ];
+}
+
+let site = await fetch('http://localhost:8000/api/v1/websites/643ae9f7dcfcb2e6230e1287', {
+	method: "GET",
+	headers: {
+		"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY0MzU0Mzg5NzNlMDA1NTM1Yjk4NGFhNSIsImlhdCI6MTY4MTIxMjI5NywiZXhwIjoxNjgzODA0Mjk3fQ.jtwE8oy16U9TaNIHLk4z1pJBRhbpLQZXkoSAtv_NArM"
+	}
+});
+let blocks = await fetch('http://localhost:8000/api/v1/blocks/', {
+	method: "GET",
+	headers: {
+		"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY0MzU0Mzg5NzNlMDA1NTM1Yjk4NGFhNSIsImlhdCI6MTY4MTIxMjI5NywiZXhwIjoxNjgzODA0Mjk3fQ.jtwE8oy16U9TaNIHLk4z1pJBRhbpLQZXkoSAtv_NArM"
+	}
+});
+
+site = await site.json();
+blocks = await blocks.json();
+
+const pageBlocks = blocks
+    .filter((b) => b.page === site.pages[0] && !b.reusable && !b.parent)
+    .sort((a, b) => a.order - b.order);
+
+const PartsBuilder = (blocks, part) => {
+  if (!part) return null;
+
+  const { _id, type, className, props } = part;
+  const children = blocks.filter((b) => b.parent === _id);
+  let inner;
+
+  if (children.length) {
+    inner = children.map((block) =>
+      PartsBuilder(
+        blocks,
+        block
+      )
+    );
+    inner = inner.join("");
+  } else {
+    inner = props ? props.inner : "";
+  }
+
+  switch (type) {
+    case "text":
+      return `
+        <p class=${className}>
+          ${inner}
+        </p>
+		`;
+    case "div":
+    return `
+        <div class=${className}>
+          ${inner}
+        </div>
+		`;
+    case "mirror":
+      const componentBlock = blocks.find((b) => b._id === props.componentId);
+      return PartsBuilder(blocks, componentBlock);
+    default:
+      return;
+  }
+};
+
+// CSS Construction
+const Styler = (site, blocks, pageBlocks) => {
+  if (!blocks || !pageBlocks) return;
+
+  let $style;
+
+  const css = BlockStyler(pageBlocks, blocks);
+  const mediaQueries = breakpoints
+    .map(
+      (breakpoint) => `@media only screen and (max-width: ${breakpoint.res}px) {
+        ${BlockStyler(pageBlocks, blocks, breakpoint.res)}}`
+    )
+    .join("");
+  const colors = site.props ? ColorStyler(site.props.colors) : "";
+  const root = `:root{${colors}}`;
+
+  $style = root + css + mediaQueries;
+  return $style;
+};
+
+const ColorStyler = (colors) => {
+  if (!colors) return "";
+  const css = colors.map(({ name, color }) => `--vc-clr-${name}: ${color};`);
+  return css.join("");
+};
+
+const BlockStyler = (blocks, allBlocks, breakpoint = "default") => {
+  const css = blocks.map(({ styles = {}, className, _id }) => {
+    const children = allBlocks.filter((b) => b.parent === _id);
+    const breakpointStyles = styles[breakpoint] ?? {};
+    const classProps = Object.keys(breakpointStyles)
+      .filter((prop) => breakpointStyles && breakpointStyles[prop].length)
+      .map((prop) => `${prop}:${breakpointStyles[prop]};`);
+    let cssClass = classProps.length
+      ? `.${className}{${classProps.join("")}}`
+      : "";
+    if (children.length) {
+      cssClass = `${cssClass} ${BlockStyler(children, blocks, breakpoint)}`;
+    }
+    return cssClass;
+  });
+  return css.join("");
+};
+
+const css = Styler(site, blocks, pageBlocks);
+---
+
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="viewport" content="width=device-width" />
+		<meta name="generator" content={Astro.generator} />
+		<title>Astro</title>
+    <style is:global set:html={resetCSS+css}>
+    </style>
+	</head>
+	<body>
+		{pageBlocks.length > 0 && pageBlocks.map((part) => <Fragment set:html={PartsBuilder(blocks, part)} />)}
+	</body>
+</html>
+
